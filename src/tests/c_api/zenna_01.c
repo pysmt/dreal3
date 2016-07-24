@@ -20,8 +20,10 @@ int main(int argc, char * argv[]) {
 
     opensmt_expr list[] = {geq, leq};
     opensmt_expr orr = opensmt_mk_or(ctx, list, 2);
+    opensmt_result res0 = opensmt_check_assump( ctx, orr );
     opensmt_assert(ctx, orr);
     opensmt_result res = opensmt_check( ctx );
+
     printf( "%s\n\n", res == l_false ? "unsat" : "sat" );
     fprintf( stderr, "1\n");
     opensmt_pop(ctx);
