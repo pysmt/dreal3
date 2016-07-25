@@ -103,7 +103,7 @@ ibex::SystemFactory* contractor_ibex_polytope::build_system_factory(vector<Enode
             // Not found
             exprctr = translate_enode_to_exprctr(var_map, e);
             m_exprctr_cache.emplace(e, exprctr);
-            DREAL_LOG_INFO << "Added: exprctr " << p << " " << exprctr << endl;
+            DREAL_LOG_INFO << "Added: exprctr " << p << " " << *exprctr << endl;
         } else {
             // Found
             exprctr = exprctr_it->second;
@@ -149,21 +149,25 @@ ibex::Array<ibex::ExprSymbol const> build_array_of_vars_from_enodes(unordered_se
 
 contractor_ibex_fwdbwd::contractor_ibex_fwdbwd(shared_ptr<nonlinear_constraint> const ctr)
     : contractor_cell(contractor_kind::IBEX_FWDBWD, ctr->get_var_array().size()), m_ctr(ctr),
-      m_numctr(ctr->get_numctr()), m_var_array(ctr->get_var_array()) {
+      m_numctr(ctr->get_numctr()) {
     if (!ctr->is_neq()) {
-        m_ctc.reset(new ibex::CtcFwdBwd(*m_numctr));
-        m_input = *(m_ctc->input);
+        auto ctc = get_ctc(std::this_thread::get_id(), false);
         // m_output will be copied from m_ctc->output, so no need to init here
+        int const * ptr_used_var = ctc->f.used_vars();
+        for (int i = 0 ; i < ctc->f.nb_used_vars(); ++i) {
+            m_input.add(*ptr_used_var++);
+        }
     }
 }
 
 void contractor_ibex_fwdbwd::prune(contractor_status & cs) {
     DREAL_LOG_DEBUG << "contractor_ibex_fwdbwd::prune";
-    if (m_ctc == nullptr) { return; }
+    auto ctc = get_ctc(std::this_thread::get_id(), true);
+    if (!ctc) { return; }
 
     thread_local static box old_box(cs.m_box);
     if (cs.m_config.nra_proof) { old_box = cs.m_box; }
-    if (m_var_array.size() == 0) {
+    if (m_numctr->f.nb_arg() == 0) {
         auto eval_result = m_ctr->eval(cs.m_box);
         if (eval_result.first == l_False) {
             cs.m_box.set_empty();
@@ -174,13 +178,13 @@ void contractor_ibex_fwdbwd::prune(contractor_status & cs) {
     }
     thread_local static ibex::IntervalVector old_iv(cs.m_box.get_values());
     old_iv = cs.m_box.get_values();
-    assert(m_var_array.size() >= 0 && static_cast<unsigned>(m_var_array.size()) <= cs.m_box.size());
+    assert(m_numctr->f.nb_arg() >= 0 && static_cast<unsigned>(m_numctr->f.nb_arg()) <= cs.m_box.size());
     DREAL_LOG_DEBUG << "Before pruning using ibex_fwdbwd(" << *m_numctr << ")";
     DREAL_LOG_DEBUG << cs.m_box;
     DREAL_LOG_DEBUG << "ibex interval = " << cs.m_box.get_values() << " (before)";
-    DREAL_LOG_DEBUG << "function = " << m_ctc->f;
-    DREAL_LOG_DEBUG << "domain   = " << m_ctc->d;
-    m_ctc->contract(cs.m_box.get_values());
+    DREAL_LOG_DEBUG << "function = " << ctc->f;
+    DREAL_LOG_DEBUG << "domain   = " << ctc->d;
+    ctc->contract(cs.m_box.get_values());
     DREAL_LOG_DEBUG << "ibex interval = " << cs.m_box.get_values() << " (after)";
     // cerr << output.empty() << used_constraints.empty() << " ";
     auto & new_iv = cs.m_box.get_values();
@@ -209,9 +213,8 @@ void contractor_ibex_fwdbwd::prune(contractor_status & cs) {
 }
 ostream & contractor_ibex_fwdbwd::display(ostream & out) const {
     out << "contractor_ibex_fwdbwd(";
-    if (m_ctc != nullptr) {
-        out << *m_numctr;
-    }
+    auto const ctc = get_ctc(std::this_thread::get_id());
+    if (ctc) { out << *m_numctr; }
     out << ")";
     return out;
 }
@@ -227,7 +230,7 @@ contractor_ibex_newton::contractor_ibex_newton(box const & box, shared_ptr<nonli
         m_ctc.reset(new ibex::CtcNewton(m_numctr->f));
         // Set up input
         ibex::BitSet const * const input = m_ctc->input;
-        for (unsigned i = 0; i <  input->size(); i++) {
+        for (int i = input->min(); i <= input->max(); i++) {
             if ((*input)[i]) {
                 m_input.add(box.get_index(m_var_array[i].name));
             }
@@ -237,7 +240,7 @@ contractor_ibex_newton::contractor_ibex_newton(box const & box, shared_ptr<nonli
 
 void contractor_ibex_newton::prune(contractor_status & cs) {
     DREAL_LOG_DEBUG << "contractor_ibex_newton::prune";
-    if (m_ctc == nullptr) { return; }
+    if (!m_ctc) { return; }
 
     // ======= Proof =======
     thread_local static box old_box(cs.m_box);
@@ -261,7 +264,7 @@ void contractor_ibex_newton::prune(contractor_status & cs) {
     // Set up output
     ibex::BitSet const * const ctc_output = m_ctc->output;
     bool changed = false;
-    for (unsigned i = 0; i <  ctc_output->size(); i++) {
+    for (int i = ctc_output->min(); i <= ctc_output->max(); i++) {
         if ((*ctc_output)[i]) {
             cs.m_output.add(cs.m_box.get_index(m_var_array[i].name));
             changed = true;
@@ -286,9 +289,7 @@ void contractor_ibex_newton::prune(contractor_status & cs) {
 }
 ostream & contractor_ibex_newton::display(ostream & out) const {
     out << "contractor_ibex_newton(";
-    if (m_ctc != nullptr) {
-        out << *m_numctr;
-    }
+    if (m_ctc) { out << *m_numctr; }
     out << ")";
     return out;
 }

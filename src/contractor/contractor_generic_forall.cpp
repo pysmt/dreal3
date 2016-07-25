@@ -394,6 +394,10 @@ box find_CE_via_underapprox(box const & b, unordered_set<Enode*> const & forall_
             ss << "find_CE_via_underapprox: unknown constraint type, " << *numctr;
             throw runtime_error(ss.str());
         }
+        if (iv.is_empty()) {
+            // stop when counterexample is already empty;
+            return counterexample;
+        }
     }
     if (!iv.is_empty()) {
         iv = iv.mid();
@@ -513,7 +517,11 @@ void contractor_generic_forall::handle_disjunction(contractor_status & cs, vecto
             }
         }
     }
-    cs.m_box = hull(boxes);
+    if (boxes.size() > 0) {
+        cs.m_box = hull(boxes);
+    } else {
+        cs.m_box.set_empty();
+    }
     return;
 }
 

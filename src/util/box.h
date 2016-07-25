@@ -55,7 +55,7 @@ public:
     void constructFromLiterals(std::vector<Enode *> const & lit_vec);
 
     std::tuple<int, box, box> bisect(double const precision) const;
-    std::vector<int> bisectable_dims(double const precision) const;
+    std::vector<int> bisectable_dims(double const precision, ibex::BitSet const & input) const;
     std::tuple<int, box, box> bisect_at(int const i) const;
     std::vector<bool> diff_dims(box const & b) const;
     box sample_point() const;
@@ -95,6 +95,11 @@ public:
     }
     ibex::Interval& get_value(Enode * const e) {
         return get_value(e->getCar()->getNameFull());
+    }
+
+    // set_value
+    inline void set_value(Enode * e, double lb, double ub) {
+        m_values[get_index(e)] = ibex::Interval(lb, ub);
     }
 
     // get_domain

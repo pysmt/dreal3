@@ -1,7 +1,8 @@
 /*********************************************************************
 Author: Soonho Kong <soonhok@cs.cmu.edu>
+        Sicun Gao <sicung@mit.edu>
 
-dReal -- Copyright (C) 2013 - 2015, the dReal Team
+dReal -- Copyright (C) 2013 - 2016, the dReal Team
 
 dReal is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -51,6 +52,7 @@ public:
     bool  check(bool c);
     bool  belongsToT(Enode * e);
     void  computeModel();
+    std::ostream & dumpFormulas(std::ostream & out) const;
 
 private:
     bool m_need_init = true;
@@ -68,12 +70,5 @@ private:
     void handle_sat_case(box const & b) const;
     void eval_sat_result(box const & b) const;
     void handle_deduction();
-
-    std::vector<Enode *> slack_vars;
-    std::vector<Enode *> slack_ctrs;
-//    std::vector<Enode *> slack_ctrs_tmp;
-    Enode * new_slack_var();
-    Enode * slack_term(Enode * e);
-    Enode * slack_constraint(Enode * e);
 };
 }  // namespace dreal

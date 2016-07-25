@@ -327,14 +327,26 @@ void solver::set_delta(double const d) {
     context->setPrecision(d);
 }
 
-void solver::set_polytope() {
+void solver::set_polytope(bool const b) {
     OpenSMTContext * const context = static_cast<OpenSMTContext *>(cctx);
-    context->getConfig().nra_polytope = true;
+    context->getConfig().nra_polytope = b;
 }
 
-void solver::set_simulation() {
+#ifdef USE_GLPK
+void solver::set_lp(bool const b) {
     OpenSMTContext * const context = static_cast<OpenSMTContext *>(cctx);
-    context->getConfig().nra_simulation_thread = true;
+    context->getConfig().nra_lp = b;
+}
+
+void solver::set_lp_only(bool const b) {
+    OpenSMTContext * const context = static_cast<OpenSMTContext *>(cctx);
+    context->getConfig().nra_linear_only = b;
+}
+#endif
+
+void solver::set_simulation(bool const b) {
+    OpenSMTContext * const context = static_cast<OpenSMTContext *>(cctx);
+    context->getConfig().nra_simulation_thread = b;
 }
 
 bool solver::solve() {
@@ -343,5 +355,8 @@ bool solver::solve() {
     return res;
 }
 
-
+ostream & solver::dump_formulas(ostream & out) const {
+    OpenSMTContext * const context = static_cast<OpenSMTContext *>(cctx);
+    return context->dumpFormulas(out);
+}
 }  // namespace dreal

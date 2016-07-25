@@ -30,7 +30,7 @@ along with dReal. If not, see <http://www.gnu.org/licenses/>.
 #include <vector>
 #include "./config.h"
 #include "constraint/constraint.h"
-#include "contractor/contractor_common.h"
+#include "contractor/contractor.h"
 #include "opensmt/egraph/Enode.h"
 #include "opensmt/smtsolvers/SMTConfig.h"
 #include "util/box.h"
@@ -157,12 +157,15 @@ class contractor_fixpoint : public contractor_cell {
 private:
     std::function<bool(box const &, box const &)> m_term_cond;
     std::vector<contractor> m_clist;
-    void init();
+    box m_old_box;
+    std::unordered_map<int, std::unordered_set<int>> m_dep_map;  // m_dep_map[v] = set of contractors depending on v (input)
 
+    void init();
     // Naive fixedpoint algorithm
     void naive_fixpoint_alg(contractor_status & cs);
     // Worklist fixedpoint algorithm
     void worklist_fixpoint_alg(contractor_status & cs);
+    void build_deps_map();
 
 public:
     contractor_fixpoint(std::function<bool(box const &, box const &)> term_cond, contractor const & c);

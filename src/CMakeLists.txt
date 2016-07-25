@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.12)
 project(DREAL C CXX)
 set(DREAL_VERSION_MAJOR 3)
 set(DREAL_VERSION_MINOR 16)
-set(DREAL_VERSION_PATCH 06.01)
+set(DREAL_VERSION_PATCH 07)
 set(PACKAGE_NAME dReal)
 set(PACKAGE_VERSION "${DREAL_VERSION_MAJOR}.${DREAL_VERSION_MINOR}.${DREAL_VERSION_PATCH}")
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
@@ -20,6 +20,7 @@ option(USE_LOCAL_THIRD_PARTY "Use local third party libraries" OFF)
 option(USE_GLPK         "Use local third party libraries" OFF)
 option(TCMALLOC         "Use tcmalloc (a.k.a. gperftools)" ON)
 option(BUILD_TEST       "Build test binaries" ON)
+option(USE_ASAN         "Use address sanitizer (-fsanitize=address)" OFF)
 
 # Added for CTest
 include(CTest)
@@ -50,6 +51,15 @@ set(CMAKE_CXX_FLAGS_DEBUG          "-g -DDREAL_DEBUG -DDREAL_TRACE -fno-inline")
 set(CMAKE_CXX_FLAGS_MINSIZEREL     "-Os -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELEASE        "-O3 -DNDEBUG")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+
+if(USE_ASAN)
+  message(STATUS "Using address sanitizer (-fsanitizer=address)")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
+  if(${CMAKE_CXX_COMPILER_ID} MATCHES "GNU")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=gold")
+    set(EXTRA_LIBS "asan" ${EXTRA_LIBS})
+  endif()
+endif(USE_ASAN)
 
 ################################################################
 # Set Module Path
@@ -214,6 +224,31 @@ JOIN("${CMAKE_CXX_FLAGS}" "," EXTERNAL_CXX_FLAGS)
 JOIN("${DREAL_EXTRA_LINKER_FLAGS}" "," EXTERNAL_LD_FLAGS)
 
 ################################################################
+# External: PICOSAT
+################################################################
+if(USE_LOCAL_THIRD_PARTY)
+  ExternalProject_Add(PICOSAT
+    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/external
+    URL ${CMAKE_SOURCE_DIR}/third_party/picosat.zip
+    CONFIGURE_COMMAND CC=${CMAKE_C_COMPILER} ./configure.sh # ${SHARED_LIB_CONFIG_COMMAND} # --prefix=${CMAKE_CURRENT_BINARY_DIR}
+    BUILD_COMMAND make
+    BUILD_IN_SOURCE 1
+    INSTALL_COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/picosat && cp picosat.h ${CMAKE_CURRENT_BINARY_DIR}/include/picosat && cp libpicosat.a ${CMAKE_CURRENT_BINARY_DIR}/lib)
+else()
+  ExternalProject_Add(PICOSAT
+    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/external
+    GIT_REPOSITORY https://github.com/dreal-deps/picosat.git
+    GIT_TAG master
+    UPDATE_COMMAND ${GIT_EXECUTABLE} fetch --all
+    COMMAND ${GIT_EXECUTABLE} reset --hard origin/master
+    CONFIGURE_COMMAND CC=${CMAKE_C_COMPILER} ./configure.sh # --prefix=${CMAKE_CURRENT_BINARY_DIR} ${SHARED_LIB_CONFIG_COMMAND}
+    BUILD_COMMAND CC=${CMAKE_C_COMPILER} make VERBOSE=1
+    BUILD_IN_SOURCE 1
+    INSTALL_COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/picosat && cp picosat.h ${CMAKE_CURRENT_BINARY_DIR}/include/picosat && cp libpicosat.a ${CMAKE_CURRENT_BINARY_DIR}/lib )
+endif()
+set(EXTRA_LIBS "picosat" ${EXTRA_LIBS})
+
+################################################################
 # External: FILIB
 ################################################################
 if(USE_LOCAL_THIRD_PARTY)
@@ -329,7 +364,7 @@ if(MINGW)
     GIT_TAG master
     UPDATE_COMMAND ${GIT_EXECUTABLE} fetch --all
            COMMAND ${GIT_EXECUTABLE} reset --hard origin/master
-    CONFIGURE_COMMAND CXX=${CMAKE_CXX_COMPILER} CC=${CMAKE_C_COMPILER} ./configure --build=x86_64-w64-mingw32 --prefix=${CMAKE_CURRENT_BINARY_DIR} ${SHARED_LIB_CONFIG_COMMAND} --enable-static --with-blas=BUILD --with-lapack=BUILD --disable-bzlib --disable-zlib
+    CONFIGURE_COMMAND CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=--std=c++11 CC=${CMAKE_C_COMPILER} ./configure --build=x86_64-w64-mingw32 --prefix=${CMAKE_CURRENT_BINARY_DIR} ${SHARED_LIB_CONFIG_COMMAND} --enable-static --with-blas=BUILD --with-lapack=BUILD --disable-bzlib --disable-zlib
     BUILD_COMMAND make
     BUILD_IN_SOURCE 1
     INSTALL_COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/coin && mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/share/coin/doc/CoinUtils && make install)
@@ -338,7 +373,7 @@ else(MINGW)
     ExternalProject_Add(CLP
       PREFIX ${CMAKE_CURRENT_BINARY_DIR}/external
       URL ${CMAKE_SOURCE_DIR}/third_party/clp-1.16.zip
-      CONFIGURE_COMMAND CXX=${CMAKE_CXX_COMPILER} CC=${CMAKE_C_COMPILER} ./configure --prefix=${CMAKE_CURRENT_BINARY_DIR} ${SHARED_LIB_CONFIG_COMMAND} --enable-static --with-blas=BUILD --with-lapack=BUILD --disable-bzlib --disable-zlib
+      CONFIGURE_COMMAND CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=--std=c++11 CC=${CMAKE_C_COMPILER} ./configure --prefix=${CMAKE_CURRENT_BINARY_DIR} ${SHARED_LIB_CONFIG_COMMAND} --enable-static --with-blas=BUILD --with-lapack=BUILD --disable-bzlib --disable-zlib
       BUILD_COMMAND make
       BUILD_IN_SOURCE 1
       INSTALL_COMMAND make install)
@@ -349,7 +384,7 @@ else(MINGW)
       GIT_TAG master
       UPDATE_COMMAND ${GIT_EXECUTABLE} fetch --all
       COMMAND ${GIT_EXECUTABLE} reset --hard origin/master
-      CONFIGURE_COMMAND CXX=${CMAKE_CXX_COMPILER} CC=${CMAKE_C_COMPILER} ./configure --prefix=${CMAKE_CURRENT_BINARY_DIR} ${SHARED_LIB_CONFIG_COMMAND} --enable-static --with-blas=BUILD --with-lapack=BUILD --disable-bzlib --disable-zlib
+      CONFIGURE_COMMAND CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=--std=c++11 CC=${CMAKE_C_COMPILER} ./configure --prefix=${CMAKE_CURRENT_BINARY_DIR} ${SHARED_LIB_CONFIG_COMMAND} --enable-static --with-blas=BUILD --with-lapack=BUILD --disable-bzlib --disable-zlib
       BUILD_COMMAND make
       BUILD_IN_SOURCE 1
       INSTALL_COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/coin && mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/share/coin/doc/CoinUtils && make install)
@@ -665,6 +700,7 @@ add_subdirectory(constraint)
 add_subdirectory(contractor)
 add_subdirectory(tools/dop)
 add_subdirectory(api)
+add_subdirectory(optimizer)
 
 SET(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${DREAL_BINARY_DIR}/lib")
 SET(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${DREAL_BINARY_DIR}/lib")
@@ -676,11 +712,13 @@ else()
   add_library(dop ${DOP_SRCS})
 endif()
 
+add_dependencies(dop PICOSAT)
 add_dependencies(dop IBEX)
 add_dependencies(dop NLOPT)
 add_dependencies(dop EASYLOGGINGPP)
 add_dependencies(dop EZOPTIONPARSER)
 add_dependencies(dop JSON)
+add_dependencies(dreal PICOSAT)
 add_dependencies(dreal IBEX)
 add_dependencies(dreal NLOPT)
 add_dependencies(dreal EASYLOGGINGPP)
@@ -752,6 +790,7 @@ file(GLOB_RECURSE DREAL_SOURCES
   ${DREAL_SOURCE_DIR}/util/*.cpp       ${DREAL_SOURCE_DIR}/util/*.h
   ${DREAL_SOURCE_DIR}/icp/*.cpp        ${DREAL_SOURCE_DIR}/icp/*.h
   ${DREAL_SOURCE_DIR}/dsolvers/*.cpp   ${DREAL_SOURCE_DIR}/dsolvers/*.h
+  ${DREAL_SOURCE_DIR}/optimizer/*.cpp   ${DREAL_SOURCE_DIR}/optimizer/*.h
   ${DREAL_SOURCE_DIR}/tests/*.cpp      ${DREAL_SOURCE_DIR}/tests/*.h
   ${DREAL_SOURCE_DIR}/tools/dop/*.cpp  ${DREAL_SOURCE_DIR}/tools/dop/*.h)
 add_style_check_target(style "${DREAL_SOURCES}")
@@ -835,56 +874,78 @@ if(APPLE AND BUILD_SHARED_LIB)
     add_custom_target(shared_lib
       COMMAND echo "Building Shared Library..."
       COMMAND cd lib && ${CMAKE_CXX_COMPILER} -fpic -shared -Wl,-all_load libdreal.a libcapd.a libibex.a libnlopt.a libprim.a libClp.a libClpSolver.a libCoinUtils.a libglpk.a -o libdreal.dylib
-      DEPENDS dreal CAPD4 IBEX FILIB CLP NLOPT GLPK)
+      DEPENDS dreal CAPD4 IBEX FILIB CLP NLOPT GLPK PICOSAT)
   else()
     add_custom_target(shared_lib
       COMMAND echo "Building Shared Library..."
       COMMAND cd lib && ${CMAKE_CXX_COMPILER} -fpic -shared -Wl,-all_load libdreal.a libcapd.a libibex.a libnlopt.a libprim.a libClp.a libClpSolver.a libCoinUtils.a -o libdreal.dylib
-      DEPENDS dreal CAPD4 IBEX FILIB CLP NLOPT)
+      DEPENDS dreal CAPD4 IBEX FILIB CLP NLOPT PICOSAT)
   endif()
 endif()
 
 add_custom_target(update_pkgs
   COMMAND echo "Update External Packages"
-  COMMAND ${CMAKE_BUILD_TOOL}
-  DEPENDS update_clp update_filib update_ibex update_nlopt update_capd update_catch update_easyloggingpp update_ezoptionparser update_json)
+  COMMAND ${CMAKE_BUILD_TOOL})
+
+if(USE_GLPK)
+  add_custom_target(update_glpk
+    COMMAND git fetch --all && git reset --hard origin/master && make install
+    WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/GLPK)
+  add_dependencies(update_pkgs update_glpk)
+endif()
 
 add_custom_target(update_clp
   COMMAND git fetch --all && git reset --hard origin/master && make install
   WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/CLP)
+add_dependencies(update_pkgs update_clp)
 
 add_custom_target(update_filib
   COMMAND git fetch --all && git reset --hard origin/master && make install
   WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/FILIB)
+add_dependencies(update_pkgs update_filib)
+
+add_custom_target(update_picosat
+  COMMAND git fetch --all && git reset --hard origin/master && mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/picosat && cp picosat.h ${CMAKE_CURRENT_BINARY_DIR}/include/picosat && cp libpicosat.a ${CMAKE_CURRENT_BINARY_DIR}/lib
+  WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/PICOSAT)
+add_dependencies(update_pkgs update_picosat)
 
 add_custom_target(update_ibex
   COMMAND git fetch --all && git reset --hard origin/master && ./waf install
   WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/IBEX
   DEPENDS update_filib update_clp)
+add_dependencies(update_pkgs update_ibex)
 
 add_custom_target(update_nlopt
   COMMAND git fetch --all && git reset --hard origin/master && make install
   WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/NLOPT)
+add_dependencies(update_pkgs update_nlopt)
 
-add_custom_target(update_capd
-  COMMAND git fetch --all && git reset --hard origin/master && make install
-  WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/CAPD4)
+if(SUPPORT_ODE)
+  add_custom_target(update_capd
+    COMMAND git fetch --all && git reset --hard origin/master && make install
+    WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/CAPD4)
+  add_dependencies(update_pkgs update_capd)
+endif()
 
 add_custom_target(update_catch
   COMMAND git fetch --all && git reset --hard origin/master && mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/catch && cp -v single_include/catch.hpp ${CMAKE_CURRENT_BINARY_DIR}/include/catch/
   WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/CATCH)
+add_dependencies(update_pkgs update_catch)
 
 add_custom_target(update_easyloggingpp
   COMMAND git fetch --all && git reset --hard origin/master && mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/easylogingpp && cp -v src/easylogging++.h ${CMAKE_CURRENT_BINARY_DIR}/include/easylogingpp/
   WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/EASYLOGGINGPP)
+add_dependencies(update_pkgs update_easyloggingpp)
 
 add_custom_target(update_ezoptionparser
   COMMAND git fetch --all && git reset --hard origin/master && mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/ezOptionParser/ && make PREFIX=${CMAKE_CURRENT_BINARY_DIR} install
   WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/EZOPTIONPARSER)
+add_dependencies(update_pkgs update_ezoptionparser)
 
 add_custom_target(update_json
   COMMAND git fetch --all && git reset --hard origin/master && mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/include/json && cp -v src/json.hpp ${CMAKE_CURRENT_BINARY_DIR}/include/json/
   WORKING_DIRECTORY ${DREAL_BINARY_DIR}/external/src/JSON)
+add_dependencies(update_pkgs update_json)
 
 # Add a distclean target to the Makefile
 ADD_CUSTOM_TARGET(distclean

@@ -22,7 +22,32 @@ let main_routine vardecl_list mode_list init goal ginv =
   let macromap = Vardeclmap.of_list float_list in
   let modemap = Modemap.of_list mode_list in
   let (init_mode, init_formula) = init in
-  Hybrid.preprocess (vardeclmap, macromap, modemap, init_mode, init_formula, goal, ginv)
+  Hybrid.preprocess (vardeclmap, macromap, modemap, init_mode, init_formula, goal, ginv, "singleton", 0, [])
+  
+let remove_time (singleton: Hybrid.t) = 
+  let vm = Map.remove "time" (Hybrid.vardeclmap singleton) in
+  let mm = Hybrid.modemap singleton in
+  let init_id = Hybrid.init_id singleton in
+  let init_formula = Hybrid.init_formula singleton in
+  let goals = Hybrid.goals singleton in
+  let ginvs = Hybrid.ginvs singleton in
+  let name = Hybrid.name singleton in
+  let num_id = Hybrid.numid singleton in
+  let labellist = Hybrid.labellist singleton in
+  Hybrid.make (vm, mm, init_id, init_formula, goals, ginvs, name, num_id, labellist)
+  
+let get_network (singleton: Hybrid.t) = 
+  (* analyze :: [string, [(string, string)]]*)
+  let base = "singleton" in
+  let inst = "singleton0" in
+  let subs = [] in
+  let init = (Hybrid.init_id singleton, Hybrid.init_formula singleton) in
+  let anal = ([(inst, base, subs, init)], ["singleton0"]) in
+  let vars = Hybrid.vardeclmap singleton in
+  let (timev, timep) =  Map.find "time" vars in
+  let time = ("time", timev, timep) in
+  let (mid, mfo) = List.hd (Hybrid.goals singleton) in (* [(modeid, formula)] *)
+  Network.postprocess_network (Network.makep (time, [singleton], Vardeclmap.of_list [], ([(inst, mid)], mfo))) anal
 %}
 
 %token LB RB LC RC LP RP EQ PLUS MINUS AST SLASH COMMA COLON SEMICOLON
@@ -45,13 +70,13 @@ let main_routine vardecl_list mode_list init goal ginv =
 
 %start main
 
-%type <Type.Hybrid.t> main
+%type <Type.Network.t> main
 %type <Type.Hybrid.formula> formula
 
 %%
 
-main: macro_list varDecl_list mode_list init goal ind { main_routine $2 $3 $4 $5 $6 }
-| macro_list varDecl_list mode_list init goal { main_routine $2 $3 $4 $5 [] }
+main: macro_list varDecl_list mode_list init goal ind { get_network (main_routine $2 $3 $4 $5 $6) }
+| macro_list varDecl_list mode_list init goal { get_network (main_routine $2 $3 $4 $5 []) }
 ;
 
 macro_list: /* */ { }
@@ -91,7 +116,7 @@ mode_list: /* */ { [] }
 
 mode: LC mode_id time_precision invts_op flows jumps RC
   {
-    Mode.make ($2, $3, $4, $5, $6, Jumpmap.of_list $6)
+    Mode.make (string_of_int $2, $2, $3, $4, $5, $6, Jumpmap.of_list $6, 0)
   }
 ;
 
@@ -210,8 +235,8 @@ jump_list: /* */ { [] }
 ;
 
 jump:
-    formula IMPLY AT FNUM formula SEMICOLON { Jump.make ($1, int_of_float $4, $5) }
-  | formula IMPLY precision AT FNUM formula SEMICOLON { Jump.makep ($1, $3, int_of_float $5, $6) }
+    formula IMPLY AT FNUM formula SEMICOLON { Jump.make ($1, string_of_int (int_of_float $4), $5, []) }
+  | formula IMPLY precision AT FNUM formula SEMICOLON { Jump.makep ($1, $3, string_of_int (int_of_float $5), $6, []) }
 ;
 
 init: INIT COLON mode_formula { $3 }
@@ -227,5 +252,5 @@ mode_formula_list: /* */ { [] }
   | mode_formula mode_formula_list { $1::$2 }
 ;
 
-mode_formula: AT FNUM formula SEMICOLON { (int_of_float $2, $3) }
+mode_formula: AT FNUM formula SEMICOLON { (string_of_int (int_of_float $2), $3) }
 ;

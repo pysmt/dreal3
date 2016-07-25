@@ -1,7 +1,7 @@
 /*********************************************************************
 Author: Soonho Kong <soonhok@cs.cmu.edu>
 
-dReal -- Copyright (C) 2013 - 2015, the dReal Team
+dReal -- Copyright (C) 2013 - 2016, the dReal Team
 
 dReal is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -240,142 +240,6 @@ ostream & contractor_ite::display(ostream & out) const {
     return out;
 }
 
-void contractor_fixpoint::init() {
-    m_input = m_clist[0].get_input();
-    for (unsigned i = 1; i < m_clist.size(); ++i) {
-        m_input.union_with(m_clist[i].get_input());
-    }
-}
-
-contractor_fixpoint::contractor_fixpoint(function<bool(box const &, box const &)> term_cond, contractor const & c)
-    : contractor_cell(contractor_kind::FP), m_term_cond(term_cond), m_clist(1, c) {
-    init();
-}
-contractor_fixpoint::contractor_fixpoint(function<bool(box const &, box const &)> term_cond, initializer_list<contractor> const & clist)
-    : contractor_cell(contractor_kind::FP), m_term_cond(term_cond), m_clist(clist) {
-    assert(m_clist.size() > 0);
-    init();
-}
-contractor_fixpoint::contractor_fixpoint(function<bool(box const &, box const &)> term_cond, vector<contractor> const & cvec)
-    : contractor_cell(contractor_kind::FP), m_term_cond(term_cond), m_clist(cvec) {
-    assert(m_clist.size() > 0);
-    init();
-}
-contractor_fixpoint::contractor_fixpoint(function<bool(box const &, box const &)> term_cond, initializer_list<vector<contractor>> const & cvec_list)
-    : contractor_cell(contractor_kind::FP), m_term_cond(term_cond), m_clist() {
-    for (auto const & cvec : cvec_list) {
-        m_clist.insert(m_clist.end(), cvec.begin(), cvec.end());
-    }
-    assert(m_clist.size() > 0);
-    init();
-}
-
-void contractor_fixpoint::prune(contractor_status & cs) {
-    DREAL_LOG_DEBUG << "contractor_fix::prune -- begin";
-    if (cs.m_config.nra_worklist_fp) {
-        worklist_fixpoint_alg(cs);
-        DREAL_LOG_DEBUG << "contractor_fix::prune -- end";
-        return;
-    } else {
-        naive_fixpoint_alg(cs);
-        DREAL_LOG_DEBUG << "contractor_fix::prune -- end";
-        return;
-    }
-}
-ostream & contractor_fixpoint::display(ostream & out) const {
-    out << "contractor_fixpoint(";
-    for (contractor const & c : m_clist) {
-        out << c << ", " << endl;
-    }
-    out << ")";
-    return out;
-}
-
-void contractor_fixpoint::naive_fixpoint_alg(contractor_status & cs) {
-    // First Iteration (run always)
-    for (contractor & c : m_clist) {
-        interruption_point();
-        c.prune(cs);
-        if (cs.m_box.is_empty()) {
-            return;
-        }
-    }
-    box old_box = cs.m_box;
-    unsigned i = 0;
-    // Next Iterations (stop when 1) a box is smaller enough or 2) termination condition holds
-    do {
-        interruption_point();
-        old_box = cs.m_box;
-        contractor & c = m_clist[i];
-        c.prune(cs);
-        if (cs.m_box.is_empty()) {
-            return;
-        }
-        i = (i + 1) % m_clist.size();
-    } while (cs.m_box.max_diam() > cs.m_config.nra_precision && !m_term_cond(old_box, cs.m_box));
-    return;
-}
-
-void contractor_fixpoint::worklist_fixpoint_alg(contractor_status & cs) {
-    thread_local static queue<unsigned> q;
-    q = queue<unsigned>();  // empty queue
-    thread_local static ibex::BitSet ctc_bitset = ibex::BitSet::empty(m_clist.size());
-    ctc_bitset.clear();
-
-    // Add all contractors to the queue.
-    for (int i = m_clist.size() - 1; i >= 0; --i) {
-        contractor & c_i = m_clist[i];
-        contractor_status_guard csg(cs);
-        c_i.prune(cs);
-        if (cs.m_box.is_empty()) { return; }
-        ibex::BitSet const & output_i = cs.m_output;
-        if (output_i.empty()) {
-            continue;
-        }
-        q.push(i);
-        ctc_bitset.add(i);
-    }
-
-    if (q.size() == 0) { return; }
-    // Fixed Point Loop
-    thread_local static box old_box(cs.m_box);
-    do {
-        interruption_point();
-        old_box = cs.m_box;
-        unsigned const idx = q.front();
-        q.pop();
-        ctc_bitset.remove(idx);
-        assert(idx < m_clist.size());
-        contractor & c = m_clist[idx];
-        contractor_status_guard csg(cs);
-        c.prune(cs);
-        if (cs.m_box.is_empty()) {
-            return;
-        }
-        auto const & c_output = cs.m_output;
-        if (!c_output.empty()) {
-            // j-th dimension is changed as a result of pruning
-            // need to add a contractor which takes j-th dim as an input
-            for (int j = c_output.min(); j <= c_output.max(); ++j) {
-                if (!c_output.contain(j)) {
-                    continue;
-                }
-                for (unsigned k = 0; k < m_clist.size(); ++k) {
-                    // Only add if it's not in the current queue
-                    if (!ctc_bitset.contain(k)) {
-                        contractor const & c_k = m_clist[k];
-                        if (c_k.get_input().contain(j)) {
-                            q.push(k);
-                            ctc_bitset.add(k);
-                        }
-                    }
-                }
-            }
-        }
-    } while (q.size() > 0 && cs.m_box.max_diam() >= cs.m_config.nra_precision && !m_term_cond(old_box, cs.m_box));
-    return;
-}
-
 contractor_int::contractor_int(box const & b) : contractor_cell(contractor_kind::INT) {
     m_input = ibex::BitSet::empty(b.size());
     auto const & vars = b.get_vars();
@@ -425,10 +289,11 @@ ostream & contractor_int::display(ostream & out) const {
 
 contractor_eval::contractor_eval(shared_ptr<nonlinear_constraint> const ctr)
     : contractor_cell(contractor_kind::EVAL), m_nl_ctr(ctr) {
-    auto const & var_array = m_nl_ctr->get_var_array();
-    m_input = ibex::BitSet::empty(m_nl_ctr->get_var_array().size());
-    for (int i = 0; i < var_array.size(); i++) {
-        m_input.add(i);
+    auto const sz = m_nl_ctr->get_var_array().size();
+    m_input = ibex::BitSet::empty(sz);
+    int const * ptr_used_var = m_nl_ctr->get_numctr()->f.used_vars();
+    for (int i = 0 ; i < m_nl_ctr->get_numctr()->f.nb_used_vars(); ++i) {
+        m_input.add(*ptr_used_var++);
     }
 }
 
@@ -467,24 +332,24 @@ contractor_cache::~contractor_cache() {
 }
 
 vector<ibex::Interval> extract_from_box_using_bitset(box const & b, ibex::BitSet const & s) {
+    if (s.empty()) { return {}; }
     vector<ibex::Interval> v;
-    if (s.empty()) { return v; }
-    for (int i = s.min(); i <= s.max(); ++i) {
-        if (s.contain(i)) {
-            v.push_back(b[i]);
-        }
-    }
+    int i = s.min();
+    do {
+        if (s.contain(i)) { v.push_back(b[i]); }
+        i = s.next(i);
+    } while (i < s.max());
     return v;
 }
 
 void update_box_using_bitset(box & b, vector<ibex::Interval> const & v, ibex::BitSet const & s) {
     if (s.empty()) { return; }
     unsigned v_idx = 0;
-    for (int i = s.min(); i <= s.max(); ++i) {
-        if (s.contain(i)) {
-            b[i] = v[v_idx++];
-        }
-    }
+    int i = s.min();
+    do {
+        if (s.contain(i)) { b[i] = v[v_idx++]; }
+        i = s.next(i);
+    } while (i < s.max());
 }
 
 void contractor_cache::prune(contractor_status & cs) {
@@ -664,12 +529,15 @@ contractor mk_contractor_fixpoint(function<bool(box const &, box const &)> guard
     return contractor(make_shared<contractor_fixpoint>(guard, c));
 }
 contractor mk_contractor_fixpoint(function<bool(box const &, box const &)> guard, initializer_list<contractor> const & clist) {
+    if (clist.size() == 0) { return mk_contractor_id(); }
     return contractor(make_shared<contractor_fixpoint>(guard, clist));
 }
 contractor mk_contractor_fixpoint(function<bool(box const &, box const &)> guard, vector<contractor> const & cvec) {
+    if (cvec.size() == 0) { return mk_contractor_id(); }
     return contractor(make_shared<contractor_fixpoint>(guard, cvec));
 }
 contractor mk_contractor_fixpoint(function<bool(box const &, box const &)> guard, initializer_list<vector<contractor>> const & cvec_list) {
+    if (cvec_list.size() == 0) { return mk_contractor_id(); }
     return contractor(make_shared<contractor_fixpoint>(guard, cvec_list));
 }
 contractor mk_contractor_int(box const & b) {

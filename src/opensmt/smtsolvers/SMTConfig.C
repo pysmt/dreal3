@@ -25,7 +25,7 @@ along with OpenSMT. If not, see <http://www.gnu.org/licenses/>.
 #include <vector>
 #include <ezOptionParser/ezOptionParser.hpp>
 #include "SMTConfig.h"
-#include "config.h"
+#include "./config.h"
 #include "util/logging.h"
 #include "util/git_sha1.h"
 #include "version.h"
@@ -156,6 +156,13 @@ SMTConfig::initializeConfig( )
   nra_show_search_progress     = false;
   nra_heuristic_forward        = false;
   nra_hybrid_notlearn_clause   = false;
+  nra_slack_level              = 0;
+#ifdef USE_GLPK
+  nra_lp                       = false;
+  nra_lp_prune                 = false;
+  nra_linear_only              = false;
+#endif
+  nra_suppress_warning         = false;
   initLogging();
 }
 
@@ -479,6 +486,11 @@ SMTConfig::parseCMDLine( int argc
     opt.add("", false, 0, 0,
             "check constraints when delta-sat",
             "--check-sat");
+
+    opt.add("", false, 1, 0,
+            "perform slacking up to a level {0(default), 1, 2}",
+            "--slack-level");
+
 #ifdef LOGGING
     opt.add("", false, 0, 0,
             "output debugging messages",
@@ -486,6 +498,9 @@ SMTConfig::parseCMDLine( int argc
     opt.add("", false, 0, 0,
             "output info messages",
             "--verbose");
+    opt.add("", false, 0, 0,
+            "suppress warning messages",
+            "--suppress-warning");
 #endif
     opt.add("", false, 0, 0,
             "output solving stats",
@@ -539,14 +554,25 @@ SMTConfig::parseCMDLine( int argc
             "Activate satelite on booleans (default: off)",
             "--sat-prep-bool", "--sat-preprocess-booleans", "--sat_preprocess_booleans");
     opt.add("", false, 0, 0,
-      "use heuristic forward search",
-      "--heuristic_forward");
+            "use heuristic forward search",
+            "--heuristic_forward");
     opt.add("", false, 0, 0,
-      "use heuristic forward search",
-      "--show-search");
+            "use heuristic forward search",
+            "--show-search");
     opt.add("", false, 0, 0,
-      "use hybrid solver clause learning",
-      "--no-hybrid-clause-learning");
+            "use hybrid solver clause learning",
+            "--no-hybrid-clause-learning");
+#ifdef USE_GLPK
+    opt.add("", false, 0, 0,
+            "only invoke linear solvers on a purely linear problem",
+            "--linear-only");
+    opt.add("", false, 0, 0,
+            "use a combination of ICP and LP",
+            "--lp-icp");
+    opt.add("", false, 0, 0,
+            "use a combination of ICP and LP and also use the LP for pruning",
+            "--lp-icp-prune");
+#endif
 
     opt.parse(argc, argv);
     opt.overview  = "dReal ";
@@ -588,6 +614,7 @@ SMTConfig::parseCMDLine( int argc
 #ifdef LOGGING
     nra_verbose             = opt.isSet("--verbose") || opt.isSet("--debug");
     nra_debug               = opt.isSet("--debug");
+    nra_suppress_warning    = opt.isSet("--suppress-warning");
 #endif
     nra_use_stat            = opt.isSet("--stat");
     nra_polytope            = opt.isSet("--polytope");
@@ -604,6 +631,11 @@ SMTConfig::parseCMDLine( int argc
     nra_show_search_progress= opt.isSet("--show-search");
     nra_heuristic_forward   = opt.isSet("--heuristic_forward");
     nra_hybrid_notlearn_clause = opt.isSet("--no-hybrid-clause-learning");
+#ifdef USE_GLPK
+    nra_lp                  = opt.isSet("--lp-icp") || opt.isSet("--lp-icp-prune");
+    nra_lp_prune            = opt.isSet("--lp-icp-prune");
+    nra_linear_only         = opt.isSet("--linear-only");
+#endif
 
     // Extract Double Args
     if (opt.isSet("--precision")) { opt.get("--precision")->getDouble(nra_precision); }
@@ -661,6 +693,13 @@ SMTConfig::parseCMDLine( int argc
     if (opt.isSet("--aggressive")) { opt.get("--aggressive")->getULong(nra_aggressive); }
     if (opt.isSet("--sample")) { opt.get("--sample")->getULong(nra_sample); }
     if (opt.isSet("--multiple-soln")) { opt.get("--multiple-soln")->getULong(nra_multiple_soln); }
+    if (opt.isSet("--slack-level")) {
+      opt.get("--slack-level")->getULong(nra_slack_level);
+      if (nra_slack_level > 2) {
+        cerr << "ERROR: --slack-level <N> should take one of {0, 1, 2}.\n\n";
+        printUsage(opt);
+      }
+    }
     if (opt.isSet("--random-seed")) {
         // Hack: ezOptionParser doesn't have an API to read 'unsigned
         // int' ( it only supports 'int' and 'unsigned long'). We
@@ -759,10 +798,12 @@ SMTConfig::parseCMDLine( int argc
         setVerbosityDebugLevel();
     } else if (nra_verbose) {
         setVerbosityInfoLevel();
+    } else if (nra_suppress_warning) {
+      void setVerbosityErrorLevel();
     } else {
         setVerbosityWarningLevel();
     }
-    #endif
+#endif
 }
 
 void SMTConfig::initLogging() {

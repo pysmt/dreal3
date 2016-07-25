@@ -969,3 +969,13 @@ void OpenSMTContext::addGetInterpolants( )
   c.command = GET_INTERPOLANTS;
   command_list.push_back( c );
 }
+
+std::ostream & OpenSMTContext::dumpFormulas(std::ostream & out) const {
+  // Retrieve the formula
+  for (auto tsolver : egraph.getTSolvers()) {
+    if (tsolver != nullptr) {
+      tsolver->dumpFormulas(out);
+    }
+  }
+  return out;
+}

@@ -1,7 +1,8 @@
 /*********************************************************************
 Author: Soonho Kong <soonhok@cs.cmu.edu>
+    Sicun Gao <sicung@mit.edu>
 
-dReal -- Copyright (C) 2013 - 2015, the dReal Team
+dReal -- Copyright (C) 2013 - 2016, the dReal Team
 
 dReal is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -43,6 +44,10 @@ along with dReal. If not, see <http://www.gnu.org/licenses/>.
 #include "util/logging.h"
 #include "util/stat.h"
 #include "util/strategy.h"
+#ifdef USE_GLPK
+#include "util/glpk_wrapper.h"
+#include "icp/lp_icp.h"
+#endif
 
 using ibex::IntervalVector;
 using nlohmann::json;
@@ -59,6 +64,7 @@ using std::make_shared;
 using std::map;
 using std::numeric_limits;
 using std::ofstream;
+using std::ostream;
 using std::ostringstream;
 using std::pair;
 using std::reference_wrapper;
@@ -91,26 +97,9 @@ nra_solver::~nra_solver() {
 // `inform` sets up env (mapping from variables(enode) in literals to their [lb, ub])
 lbool nra_solver::inform(Enode * e) {
     DREAL_LOG_INFO << "nra_solver::inform: " << e;
-    // Collect Literal
     m_lits.push_back(e);
     m_need_init = true;
     return l_Undef;
-/*
-    if (!e->isIntegral() && !e->isForall() && !e->isForallT() ) {
-        cout << "Before slacking: "<< e << endl;
-        e = slack_constraint(e);
-        cout << "After slacking: "<< e << endl;
-    }
-    m_lits.push_back(e);
-    for (auto l : slack_ctrs_tmp) {
-        l -> setPolarity(l_True);
-        m_lits.push_back(l);
-        cout << "Collected slack equality: "<< l << endl;
-    }
-    slack_ctrs_tmp.clear(); //sorry for the temporary hack. slack_ctrs_tmp keeps the slack equalities for this constraint.
-    m_need_init = true;
-    return l_Undef;
-*/
 }
 
 // Simplify box b using a constraint e.
@@ -131,13 +120,13 @@ static lbool simplify(Enode * e, lbool p, box & b) {
         if (first->isVar() && second->isConstant()) {
             // v >= c
             auto & iv = b[first];
-            iv &= ibex::Interval(second->getValue(), iv.ub());
+            iv &= ibex::Interval(second->getValueLowerBound(), iv.ub());
             if (iv.is_empty()) { b.set_empty(); }
             return l_True;
         } else if (first->isConstant() && second->isVar()) {
             // c >= v
             auto & iv = b[second];
-            iv &= ibex::Interval(iv.lb(), first->getValue());
+            iv &= ibex::Interval(iv.lb(), first->getValueUpperBound());
             if (iv.is_empty()) { b.set_empty(); }
             return l_True;
         }
@@ -146,13 +135,13 @@ static lbool simplify(Enode * e, lbool p, box & b) {
         if (first->isVar() && second->isConstant()) {
             // v <= c
             auto & iv = b[first];
-            iv &= ibex::Interval(iv.lb(), second->getValue());
+            iv &= ibex::Interval(iv.lb(), second->getValueUpperBound());
             if (iv.is_empty()) { b.set_empty(); }
             return l_True;
         } else if (first->isConstant() && second->isVar()) {
             // c <= v
             auto & iv = b[second];
-            iv &= ibex::Interval(first->getValue(), iv.ub());
+            iv &= ibex::Interval(first->getValueLowerBound(), iv.ub());
             if (iv.is_empty()) { b.set_empty(); }
             return l_True;
         }
@@ -160,13 +149,13 @@ static lbool simplify(Enode * e, lbool p, box & b) {
         if (first->isVar() && second->isConstant()) {
             // v == c
             auto & iv = b[first];
-            iv &= ibex::Interval(second->getValue(), second->getValue());
+            iv &= ibex::Interval(second->getValueLowerBound(), second->getValueUpperBound());
             if (iv.is_empty()) { b.set_empty(); }
             return l_True;
         } else if (first->isConstant() && second->isVar()) {
             // c == v
             auto & iv = b[second];
-            iv &= ibex::Interval(first->getValue(), first->getValue());
+            iv &= ibex::Interval(first->getValueLowerBound(), first->getValueUpperBound());
             if (iv.is_empty()) { b.set_empty(); }
             return l_True;
         } else if (first->isVar() && second->isVar()) {
@@ -215,7 +204,6 @@ bool nra_solver::assertLit(Enode * e, bool reason) {
     auto it = m_ctr_map.find(make_pair(e, e->getPolarity() == l_True));
     if (it != m_ctr_map.end()) {
         shared_ptr<constraint> const ctr = it->second;
-        m_stack.push_back(ctr);
         if (ctr->get_type() == constraint_type::Nonlinear) {
             // Try to prune box using the constraint via callign simplify
             lbool const simplify_result = simplify(e, e->getPolarity(), m_cs.m_box);
@@ -231,6 +219,7 @@ bool nra_solver::assertLit(Enode * e, bool reason) {
                 m_cs.m_used_constraints.insert(ctr);
             }
         }
+        m_stack.push_back(ctr);
     } else if (e->isIntegral() && e->getPolarity() == l_False) {
         return true;
     } else {
@@ -244,8 +233,8 @@ bool nra_solver::assertLit(Enode * e, bool reason) {
 
 // Update ctr_map by adding new nonlinear_constraints
 static void initialize_nonlinear_constraints(map<pair<Enode*, bool>, shared_ptr<constraint>> & ctr_map,
-                                      vector<Enode *> const & lits,
-                                      unordered_set<Enode *> const & var_set) {
+                                             vector<Enode *> const & lits,
+                                             unordered_set<Enode *> const & var_set) {
     // Create Nonlinear constraints.
     for (Enode * const l : lits) {
         auto it_nc_pos = ctr_map.find(make_pair(l, true));
@@ -265,8 +254,8 @@ static void initialize_nonlinear_constraints(map<pair<Enode*, bool>, shared_ptr<
 
 // Update ctr_map by adding new ode constraints, from the information collected in ints and invs
 static void initialize_ode_constraints(map<pair<Enode*, bool>, shared_ptr<constraint>> & ctr_map,
-                                vector<integral_constraint> const & ints,
-                                vector<shared_ptr<forallt_constraint>> const & invs) {
+                                       vector<integral_constraint> const & ints,
+                                       vector<shared_ptr<forallt_constraint>> const & invs) {
     // Attach the corresponding forallT literals to integrals
     for (integral_constraint ic : ints) {
         vector<shared_ptr<forallt_constraint>> local_invs;
@@ -348,10 +337,10 @@ void nra_solver::initialize_constraints(vector<Enode *> const & lits) {
 
 void nra_solver::initialize(vector<Enode *> const & lits) {
     m_cs.m_box.constructFromLiterals(lits);
+    m_cs.m_output = ibex::BitSet::empty(m_cs.m_box.size());
     initialize_constraints(lits);
     m_need_init = false;
 }
-
 
 // Saves a backtrack point You are supposed to keep track of the
 // operations, for instance in a vector called "undo_stack_term", as
@@ -427,7 +416,7 @@ void nra_solver::handle_sat_case(box const & b) const {
             DREAL_LOG_FATAL << "The following exception is generated while computing a trace (visualization)." << endl;
             DREAL_LOG_FATAL << e.what();
             DREAL_LOG_FATAL << "This indicates that this delta-sat result is not properly checked by ODE pruning operators.";
-            DREAL_LOG_FATAL << "Please re-run the tool with a smaller precision (current precision = " << config.nra_precision << ")." << endl;
+            DREAL_LOG_FATAL << "Please try with a smaller precision using the --precision option (current precision = " << config.nra_precision << ")." << endl;
         }
     }
 #endif
@@ -466,15 +455,18 @@ void nra_solver::handle_deduction() {
 // If flag is set make sure you run a complete check
 bool nra_solver::check(bool complete) {
     if (config.nra_use_stat) { config.nra_stat.increase_check(complete); }
-    if (m_stack.size() == 0) { return true; }
     DREAL_LOG_INFO << "nra_solver::check(complete = " << boolalpha << complete << ")"
                    << "stack size = " << m_stack.size();
+    if (m_stack.size() == 0) {
+        handle_sat_case(m_cs.m_box);
+        return true;
+    }
     default_strategy stg;
     m_ctc = stg.build_contractor(m_cs.m_box, m_stack, complete, config);
     if (complete) {
         // Complete Check ==> Run ICP
         if (config.nra_simulation_thread) {
-            simulation_icp::solve(m_ctc, m_cs, m_lits);
+            simulation_icp::solve(m_ctc, m_cs, m_lits, egraph);
         } else if (config.nra_ncbt) {
             ncbt_icp::solve(m_ctc, m_cs);
         } else if (config.nra_multiprune) {
@@ -485,6 +477,25 @@ bool nra_solver::check(bool complete) {
             SizeGradAsinhBrancher sb1(m_stack);
             vector<reference_wrapper<BranchHeuristic>> heuristics = {sb, sb1};
             multiheuristic_icp::solve(m_ctc, m_cs, m_stack, heuristics);
+#ifdef USE_GLPK
+        } else if (config.nra_linear_only) {
+            unordered_set<Enode *> linear_stack;
+            for (auto c : m_stack) {
+                assert(c->get_enodes().size() == 1);
+                linear_stack.emplace(c->get_enodes()[0]);
+                m_cs.m_used_constraints.insert(c);
+            }
+            glpk_wrapper solver(m_cs.m_box, linear_stack);
+            bool const result = solver.is_sat();
+            if (!result) {
+                explanation = generate_explanation(m_cs.m_used_constraints);
+            } else {
+                handle_sat_case(m_cs.m_box);
+            }
+            return result;
+        } else if (config.nra_lp) {
+            lp_icp::solve(m_ctc, m_cs, m_stack);
+#endif
         } else {
             naive_icp::solve(m_ctc, m_cs, m_stack);
         }
@@ -492,7 +503,6 @@ bool nra_solver::check(bool complete) {
         // Incomplete Check ==> Prune Only
         try {
             m_ctc.prune(m_cs);
-            if (config.nra_use_stat) { config.nra_stat.increase_prune(); }
         } catch (contractor_exception & e) {
             // Do nothing
         }
@@ -530,8 +540,6 @@ vector<Enode *> nra_solver::generate_explanation(unordered_set<shared_ptr<constr
     return exps;
 }
 
-// Return true if the enode belongs to this theory. You should examine
-// the structure of the node to see if it matches the theory operators
 bool nra_solver::belongsToT(Enode * e) {
     (void)e;
     assert(e);
@@ -555,79 +563,12 @@ void nra_solver::computeModel() {
     }
 }
 
-Enode * nra_solver::new_slack_var() {
-    Snode * s = sstore.mkReal();
-    int num = slack_vars.size();
-    //  cout << "slack var number: "<< num << endl;
-    string name("slack_var_");
-    name += to_string(num);
-    egraph.newSymbol(name.c_str(), s, true);
-
-    Enode * var = egraph.mkVar(name.c_str());
-    slack_vars.push_back(var);
-/*
-    var->setDomainLowerBound(lb);
-    var->setDomainUpperBound(ub);
-    var->setValueLowerBound(lb);
-    var->setValueUpperBound(ub);
-*/
-    return var;
-}
-
-Enode * nra_solver::slack_term(Enode * e) {
-    if (e->isConstant() || e->isNumb() || e->isVar()) {
-        return e;
-    } else if (e->isTerm()) {
-        assert(e->getArity() >= 1);
-        enodeid_t id = e->getCar()->getId();
-        Enode * ret;
-        Enode * tmp = e;
-        switch (id) {
-        case ENODE_ID_PLUS:
-            ret = slack_term(tmp->get1st());
-            tmp = tmp->getCdr()->getCdr();
-            while (!tmp->isEnil()) {
-                ret = egraph.mkPlus(ret, slack_term(tmp->getCar()));
-                tmp = tmp->getCdr();
-            }
-            return ret;
-        case ENODE_ID_MINUS:
-            ret = slack_term(tmp->get1st());
-            tmp = tmp->getCdr()->getCdr();
-            while (!tmp->isEnil()) {
-                ret = egraph.mkMinus(ret, slack_term(tmp->getCar()));
-                tmp = tmp->getCdr();
-            }
-            return ret;
-        case ENODE_ID_UMINUS:
-            ret = slack_term(tmp->get1st());
-            assert(tmp->getArity() == 1);
-            return egraph.mkUminus(egraph.cons(ret));
-        default:
-            // not descending to subtrees for now
-            Enode * svar = new_slack_var();
-            Enode * sctr = egraph.mkEq(egraph.cons(svar, egraph.cons(e)));
-            slack_ctrs.push_back(sctr);
-            // slack_ctrs_tmp.push_back(sctr);
-            return svar;
-        }
-    } else {
-        throw runtime_error("Slack operation error.");
+// dump all asserted formulas
+ostream & nra_solver::dumpFormulas(ostream & out) const {
+    for (auto const ctr_ptr : m_stack) {
+        out << *ctr_ptr << endl;
     }
+    return out;
 }
 
-Enode * nra_solver::slack_constraint(Enode * e) {
-    assert(e->getArity() == 2);
-
-    Enode * left = e -> get1st();
-    Enode * right = e -> get2nd();
-    Enode * head = e -> getCar();
-
-    Enode * linear_left = slack_term(left);
-    Enode * linear_right = slack_term(right);
-
-    Enode * ret = egraph.cons(head, egraph.cons(linear_left, egraph.cons(linear_right)));
-
-    return ret;
-}
 }  // namespace dreal

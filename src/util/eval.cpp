@@ -554,5 +554,4 @@ double deriv_enode(Enode * const e, Enode * const v, unordered_map<Enode*, doubl
     }
     throw runtime_error("Not implemented yet: deriv_enode");
 }
-
 }  // namespace dreal

@@ -34,12 +34,16 @@ namespace dreal {
 
 class glpk_wrapper {
 private:
+    // solver type
+    enum solver_type_t {SIMPLEX, INTERIOR, EXACT};
     // for indexing variables
     box domain;
     // the lp
     glp_prob *lp;
     // whether to use simplex or interior point
-    bool simplex;
+    solver_type_t solver_type;
+    // has the problem been changed since it was solved
+    bool changed;
 
     unsigned get_index(Enode * e) const {
         return domain.get_index(e);
@@ -49,16 +53,23 @@ private:
 
     void init_problem();
 
+    double get_row_value(int row);
+
+    bool check_unsat_error_kkt(double precision);
+
 public:
     explicit glpk_wrapper(box const & b);
     glpk_wrapper(box const & b, std::unordered_set<Enode *> const & es);
     ~glpk_wrapper();
 
     bool is_sat();
+    bool is_solution_unbounded();
     void get_solution(box & b);
     double get_objective();
 
     void set_domain(box const & b);
+    const box& get_domain() const;
+
     void add(Enode * const e);
     void add(std::unordered_set<Enode *> const & es);
 
@@ -66,18 +77,21 @@ public:
     void set_minimize();
     void set_maximize();
 
+    void get_error_bounds(double * errors);
+    bool certify_unsat(double precision);
+
     void use_simplex();
     void use_interior_point();
+    void use_exact();
+
+    bool is_constraint_used(int index);
 
     int print_to_file(const char *fname);
 
     static bool is_linear(Enode * const e);
     static bool is_expr_linear(Enode * const e);
+    static bool is_simple_bound(Enode * const e);
 };
-/*
-    push: () → ()
-    pop: () → ()
-*/
 
 }  // namespace dreal
 #endif

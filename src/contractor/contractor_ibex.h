@@ -26,10 +26,12 @@ along with dReal. If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <memory>
 #include <utility>
+#include <thread>
+#include "constraint/constraint.h"
+#include "contractor/contractor.h"
 #include "opensmt/egraph/Enode.h"
 #include "util/box.h"
-#include "constraint/constraint.h"
-#include "contractor/contractor_common.h"
+#include "util/logging.h"
 
 namespace dreal {
 
@@ -37,13 +39,46 @@ class contractor_ibex_fwdbwd : public contractor_cell {
 private:
     std::shared_ptr<nonlinear_constraint> m_ctr;
     std::shared_ptr<ibex::NumConstraint const> m_numctr;
-    ibex::Array<ibex::ExprSymbol const> const & m_var_array;
-    std::shared_ptr<ibex::CtcFwdBwd> m_ctc;
+    std::unordered_map<std::thread::id, std::shared_ptr<ibex::CtcFwdBwd>> m_ctc_map;
+    std::vector<ibex::Function> m_func_store;
+    std::shared_ptr<ibex::CtcFwdBwd> get_ctc(std::thread::id const tid, bool const need_to_clone) {
+        // non-const version: look up m_ctc_map
+        // if found, return one in the map
+        // if not found, create one. Depending on the value of need_to_clone,
+        //               use m_numctr or clone one to create ibex::CtcFwdBwd
+        auto const it = m_ctc_map.find(tid);
+        if (it == m_ctc_map.end()) {
+            // not found, make one
+            if (m_ctr->is_neq()) {
+                m_ctc_map.emplace(tid, nullptr);
+            } else {
+                if (need_to_clone) {
+                    // Since ibex::CtcFwdBwd takes a reference of a
+                    // ibex::Function. If we don't store a function
+                    // inside of a vector(store), it will be destroyed
+                    // after this scope and m_ctc will point to that
+                    // destroyed function.
+                    m_func_store.emplace_back(m_numctr->f, ibex::Function::COPY);
+                    ibex::CmpOp const op = m_numctr->op;
+                    m_ctc_map.emplace(tid, std::make_shared<ibex::CtcFwdBwd>(m_func_store.back(), op));
+                } else {
+                    m_ctc_map.emplace(tid, std::make_shared<ibex::CtcFwdBwd>(*m_numctr));
+                }
+            }
+            return m_ctc_map[tid];
+        } else {
+            // found
+            return it->second;
+        }
+    }
+    std::shared_ptr<ibex::CtcFwdBwd> get_ctc(std::thread::id const tid) const {
+        // const version, simply look up m_ctc_map
+        return m_ctc_map.at(tid);
+    }
 
 public:
     explicit contractor_ibex_fwdbwd(std::shared_ptr<nonlinear_constraint> const ctr);
     void prune(contractor_status & cs);
-    ibex::Array<ibex::ExprSymbol const> const & get_var_array() const { return m_var_array; }
     std::ostream & display(std::ostream & out) const;
 };
 

@@ -24,6 +24,7 @@ along with OpenSMT. If not, see <http://www.gnu.org/licenses/>.
 #include <iostream>
 #include <chrono>
 #include <sys/stat.h>
+#include "./config.h"
 #include "common/Global.h"
 #include "util/stat.h"
 #include "minisat/core/SolverTypes.h"
@@ -181,8 +182,11 @@ struct SMTConfig
   bool         nra_use_delta_heuristic;       // Split variable in constraint with max residual delta?
   bool         nra_short_sat;                 // Test theory if CNF is SAT, before have full model.
   double       nra_precision;                 // the value of delta
+#ifdef LOGGING
   bool         nra_verbose;                   // --verbose option
   bool         nra_debug;                     // --debug option
+  bool         nra_suppress_warning;          // suppress warnings (default: false)
+#endif
   bool         nra_use_stat;                  // --stat option
   dreal::stat  nra_stat;
   bool         nra_proof;                     // --proof option
@@ -233,10 +237,16 @@ struct SMTConfig
   int          nra_icp_decisions;             // number of icp branch nodes
   bool         nra_show_search_progress;      // print search progress to console
   bool         nra_heuristic_forward;         // use forward search in the heuristic solution
-  bool         nra_hybrid_notlearn_clause;       // use clause learning in hybrid heuristic
+  bool         nra_hybrid_notlearn_clause;    // use clause learning in hybrid heuristic
+  unsigned long nra_slack_level;              // determine slack level
 
   void inc_icp_decisions() { nra_icp_decisions++; }
   int  icp_decisions() { return nra_icp_decisions; }
+#ifdef USE_GLPK
+  bool         nra_lp;                        // use a combination of ICP and LP
+  bool         nra_lp_prune;                  // use the LP solver for pruning
+  bool         nra_linear_only;               // use glpk on linear only problems
+#endif
 
   void setODEFwdTimeout(double const ode_fwd_timeout);
   void setODEBwdTimeout(double const ode_bwd_timeout);

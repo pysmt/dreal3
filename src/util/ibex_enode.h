@@ -1,9 +1,8 @@
 /*********************************************************************
 Author: Soonho Kong <soonhok@cs.cmu.edu>
         Sicun Gao <sicung@cs.cmu.edu>
-        
 
-dReal -- Copyright (C) 2013 - 2015, the dReal Team
+dReal -- Copyright (C) 2013 - 2016, the dReal Team
 
 dReal is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -28,6 +27,7 @@ along with dReal. If not, see <http://www.gnu.org/licenses/>.
 #include "opensmt/egraph/Enode.h"
 
 namespace dreal {
+ibex::Interval str_to_ibex_interval(std::string const & s);
 ibex::ExprNode const * translate_enode_to_exprnode(std::map<std::string, ibex::Variable const> & var_map, Enode * const e, std::unordered_map<Enode*, ibex::Interval> const & subst = std::unordered_map<Enode*, ibex::Interval>());
 ibex::ExprCtr  const * translate_enode_to_exprctr(std::map<std::string, ibex::Variable const> & var_map, Enode * const e, lbool p = l_Undef, std::unordered_map<Enode*, ibex::Interval> const & subst = std::unordered_map<Enode*, ibex::Interval>());
 std::map<std::string, ibex::Variable const> build_var_map(std::unordered_set<Enode *> const & vars);
