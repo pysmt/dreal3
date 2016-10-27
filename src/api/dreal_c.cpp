@@ -836,3 +836,9 @@ dreal_result dreal_get_bool(dreal_context c, dreal_expr p) {
     return l_undef;
 }
 #endif
+
+void dreal_set_option(dreal_context c, const char * key, const char * value) {
+    assert(c);
+    OpenSMTContext * c_ = static_cast<OpenSMTContext *>(c);
+    c_->SetOption(key, value);
+}
