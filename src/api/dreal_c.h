@@ -113,6 +113,7 @@ dreal_expr dreal_mk_tanh(dreal_context, dreal_expr);
 dreal_expr dreal_mk_atan2(dreal_context, dreal_expr, dreal_expr);
 dreal_expr dreal_mk_min(dreal_context, dreal_expr, dreal_expr);
 dreal_expr dreal_mk_max(dreal_context, dreal_expr, dreal_expr);
+void dreal_set_option(dreal_context, const char*, const char*);
 
 // void dreal_polarity(dreal_context c, dreal_expr a, int pos);
 // void dreal_prefer(dreal_expr a);
